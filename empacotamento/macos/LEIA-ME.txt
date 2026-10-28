@@ -1,0 +1,24 @@
+CONTROLE FINANCEIRO — INSTALAÇÃO NO MAC (macOS 12 ou superior)
+
+1. Arraste "Controle Financeiro.app" para a pasta Aplicativos.
+
+2. Na primeira vez, o macOS bloqueia apps baixados da internet que não são
+   da App Store. Para liberar:
+     - Dê dois cliques no app. Vai aparecer um aviso; clique em "OK"/"Concluído".
+     - Abra Ajustes do Sistema > Privacidade e Segurança, role até o fim e
+       clique em "Abrir Mesmo Assim" ao lado de "Controle Financeiro".
+     - Abra o app de novo e confirme "Abrir".
+   (Alternativa pelo Terminal:  xattr -dr com.apple.quarantine "/Applications/Controle Financeiro.app")
+
+3. Na primeira abertura o app baixa o Python e os componentes (~120 MB,
+   cerca de 1 minuto, precisa de internet). Uma notificação avisa quando
+   estiver pronto e ele abre no navegador. Das próximas vezes abre direto.
+
+4. Para fechar o aplicativo, use o botão "Encerrar aplicativo" na barra lateral.
+
+Seus dados ficam em:  ~/Library/Application Support/ControleFinanceiro
+(financeiro.db). Para backup, copie esse arquivo ou use "Backup dos dados"
+na barra lateral do app.
+
+Para desinstalar: apague o app da pasta Aplicativos e, se quiser apagar
+também os dados, a pasta acima.

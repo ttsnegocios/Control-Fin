@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Controle Financeiro</title>
+  <meta name="theme-color" content="#1d5fb5" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icones/icone-192.png" />
+  <link rel="apple-touch-icon" href="icones/icone-192.png" />
+  <link rel="stylesheet" href="stlite/stlite.css" />
+  <script src="config.js?v=__VERSAO__"></script>
+  <script src="vendor/msal-browser.min.js"></script>
+  <style>
+    html, body { margin: 0; background: #ffffff; }
+    #carregando { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 16px; font: 15px/1.4 system-ui, sans-serif; color: #31333f;
+      background: #ffffff; z-index: 10; text-align: center; padding: 24px; }
+    #carregando img { width: 96px; height: 96px; }
+    #carregando small { color: #6b6b6b; max-width: 320px; }
+    @media (prefers-color-scheme: dark) {
+      html, body, #carregando { background: #0e1117; color: #fafafa; }
+      #carregando small { color: #a3a3a3; }
+    }
+  </style>
+</head>
+<body>
+  <div id="carregando">
+    <img src="icones/icone-192.png" alt="" />
+    <strong>Controle Financeiro</strong>
+    <small id="msg">Carregando… Na primeira abertura são baixados cerca de 40 MB (precisa de internet). Depois funciona offline.</small>
+  </div>
+  <div id="root"></div>
+  <script type="module">
+    import { mount } from "./stlite/stlite.js";
+    import { iniciarNuvem } from "./nuvem.js?v=__VERSAO__";
+
+    const VERSAO = "__VERSAO__";
+    const txt = (p) => fetch(`${p}?v=${VERSAO}`).then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
+    const url = (p) => new URL(p, location.href).href;
+
+    try {
+      const [app, db, resumo] = await Promise.all([txt("app/app.py"), txt("app/db.py"), txt("app/resumo.py")]);
+      const controller = mount({
+        entrypoint: "app.py",
+        files: { "app.py": app, "db.py": db, "resumo.py": resumo },
+        prebuiltPackageNames: ["sqlite3"],
+        requirements: __REQUIREMENTS__,
+        idbfsMountpoints: ["/mnt"],          // dados persistidos no IndexedDB do aparelho
+        env: { CF_DATA_DIR: "/mnt/dados", CF_PLATAFORMA: "web" },
+        streamlitConfig: { "client.toolbarMode": "minimal" },
+        disableProgressToasts: true,
+      }, document.getElementById("root"));
+      // esconde a tela de carregamento quando o Streamlit começar a desenhar
+      const obs = new MutationObserver(() => {
+        if (document.querySelector('[data-testid="stSidebar"], [data-testid="stMain"]')) {
+          document.getElementById("carregando").remove(); obs.disconnect();
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+      iniciarNuvem(controller).catch((e) => console.error("[nuvem]", e));
+    } catch (e) {
+      document.getElementById("msg").textContent = "Não foi possível carregar o aplicativo: " + e.message;
+    }
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    }
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist();   // pede ao navegador para não apagar os dados
+    }
+  </script>
+</body>
+</html>

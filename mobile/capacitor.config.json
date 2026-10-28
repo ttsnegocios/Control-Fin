@@ -1,0 +1,10 @@
+{
+  "appId": "br.controlefinanceiro.app",
+  "appName": "Controle Financeiro",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "never" },
+  "plugins": {
+    "SystemBars": { "insetsHandling": "css" }
+  }
+}

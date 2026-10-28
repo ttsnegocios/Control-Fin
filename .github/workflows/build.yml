@@ -1,0 +1,127 @@
+# Gera todos os instaladores no GitHub (gratuito para repositórios públicos e privados dentro da cota).
+# - Windows (.exe), macOS (.zip) e o app de celular Android (.apk) ficam em "Artifacts" da execução
+#   e, ao criar uma tag v*, são anexados a uma Release.
+# - O app de celular (pasta mobile/) é publicado no GitHub Pages: instalável no Android (Chrome)
+#   e no iPhone (Safari → Adicionar à Tela de Início), funcionando offline.
+name: Build instaladores
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  pacotes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Instalar NSIS
+        run: sudo apt-get update -q && sudo apt-get install -y -q nsis
+      - name: Gerar Windows, macOS e web
+        env:
+          ONEDRIVE_CLIENT_ID: ${{ vars.ONEDRIVE_CLIENT_ID }}
+        run: python empacotamento/build.py windows macos web
+      - name: Testar sincronização
+        run: node empacotamento/testes/sincronizacao.test.mjs
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: "dist/*Windows-Setup.exe" }
+      - uses: actions/upload-artifact@v4
+        with: { name: macos, path: "dist/*macOS.zip" }
+      - uses: actions/upload-artifact@v4
+        with: { name: web-onedrive, path: dist/web, include-hidden-files: true }
+
+  executavel-windows:
+    # Executável único (não precisa instalar nem de internet), compilado num Windows real
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Instalar dependências
+        run: pip install -r requirements.lock pyinstaller==6.22.3
+      - name: Gerar ControleFinanceiro.exe
+        run: pyinstaller empacotamento/executavel/ControleFinanceiro.spec --noconfirm
+      - name: Testar o executável (abre, responde e encerra)
+        shell: pwsh
+        run: |
+          $env:CF_DATA_DIR = "$env:RUNNER_TEMP\cfteste"
+          $env:BROWSER = "none"
+          $p = Start-Process -FilePath "dist\ControleFinanceiro.exe" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $porta = (Get-Content "$env:CF_DATA_DIR\servidor.json" | ConvertFrom-Json).porta
+              $r = Invoke-WebRequest "http://127.0.0.1:$porta/_stcore/health" -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {}
+          }
+          Get-Content "$env:CF_DATA_DIR\app.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Get-Process ControleFinanceiro -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not $ok) { throw "O executável não respondeu" }
+          if (-not (Test-Path "$env:CF_DATA_DIR\financeiro.db")) { Write-Host "Banco é criado na primeira página aberta (ok)" }
+      - name: Renomear
+        shell: pwsh
+        run: Move-Item dist\ControleFinanceiro.exe "ControleFinanceiro-$(Get-Content VERSION)-Windows.exe"
+      - uses: actions/upload-artifact@v4
+        with: { name: executavel-windows, path: "*-Windows.exe" }
+
+  app-celular:
+    # App de celular (TypeScript + SQLite local): testes, PWA e APK Android
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Dependências
+        run: npm ci && pip install pandas
+      - name: Testes (inclui compatibilidade do banco com o app de desktop)
+        run: npm test
+      - name: Build do app
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: mobile/dist }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - name: Gerar APK Android
+        run: |
+          VERSAO=$(cat ../VERSION)
+          npx cap sync android
+          sed -i "s/versionName \".*\"/versionName \"$VERSAO\"/" android/app/build.gradle
+          cd android && ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/ControleFinanceiro-$VERSAO-Android.apk"
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: "ControleFinanceiro-*-Android.apk" }
+
+  pages:
+    needs: app-celular
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  release:
+    needs: [pacotes, app-celular, executavel-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true, pattern: "{windows,macos,android,executavel-windows}" }
+      - uses: softprops/action-gh-release@v2
+        with: { files: "out/*" }
