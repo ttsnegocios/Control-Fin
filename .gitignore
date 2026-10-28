@@ -1,0 +1,4 @@
+dist/
+dados/
+__pycache__/
+*.pyc
